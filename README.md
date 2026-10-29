@@ -11,15 +11,38 @@ Nothing to install: it is a PowerShell script, which comes with Windows.
 
 - `SmartPaste.ps1` - the tool
 - `SmartPaste.bat` - double-click this to start it
+- `SmartPasteHelper.ps1` - optional background helper (see below)
+- `SmartPasteHelper.bat` - double-click this to start the helper
 
-Keep both files in the same folder.
+Keep all the files in the same folder.
+
+## Helper: button on the one-of box
+
+The helper sits in the system tray (a blue **SP** icon) and shows a blue
+**SmartPaste** button in the bottom-right corner of the Raiser's Edge
+**Edit Field Criteria** box whenever that box is the active window. Click it to open
+SmartPaste, or click it again to bring an already open SmartPaste to the front.
+Raiser's Edge runs in Citrix, so the button floats over the box rather than being
+part of it, and it shows for every operator, not only **one of**.
+
+Right-click the tray icon for:
+
+- **Open SmartPaste** (double-clicking the icon does the same)
+- **Start with Windows** - tick to start the helper each time you sign in to Windows.
+  This adds a shortcut named `SmartPaste Helper` to your Startup folder; untick to
+  remove it.
+- **Exit**
+
+If you move the SmartPaste folder, untick and re-tick **Start with Windows** so the
+shortcut points to the new place.
 
 ## How to use
 
 1. In Excel, select the column of values (constituent IDs, codes, ...) and copy it.
-2. Double-click `SmartPaste.bat`. The list from your clipboard appears in the window.
-   Check the count looks right.
-3. In Raiser's Edge, add your criterion and choose **one of**.
+2. In Raiser's Edge, add your criterion and choose **one of**.
+3. Open SmartPaste: click the **SmartPaste** button on the box if the helper is
+   running, or double-click `SmartPaste.bat`. The list from your clipboard appears
+   in the window. Check the count looks right.
 4. Click **Start typing** in SmartPaste, then click the first empty row in the
    Raiser's Edge one-of box before the countdown ends.
 5. SmartPaste types the values. Press **Esc** or switch to another window to stop.
