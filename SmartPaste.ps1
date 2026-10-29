@@ -1,5 +1,5 @@
 # SmartPaste - types a list of values (e.g. copied from an Excel column) into the
-# focused field one at a time, pressing a key such as Enter after each value.
+# focused field one at a time, pressing a key such as Tab after each value.
 # Built for the "one of" criterion in the Raiser's Edge database view query screen.
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -10,6 +10,13 @@ using System.Runtime.InteropServices;
 public static class SmartPasteWin32 {
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder text, int maxCount);
+    public static string GetWindowTitle(IntPtr hWnd) {
+        var sb = new System.Text.StringBuilder(256);
+        GetWindowText(hWnd, sb, sb.Capacity);
+        return sb.ToString();
+    }
 }
 "@
 
@@ -89,8 +96,11 @@ $lblAfter.AutoSize = $true
 $form.Controls.Add($lblAfter)
 
 $cmbAfter = New-Object System.Windows.Forms.ComboBox
-$cmbAfter.Items.AddRange(@('{ENTER}', '{TAB}', '{DOWN}', '{TAB}{ENTER}'))
-$cmbAfter.Text = '{ENTER}'
+# Tab saves the value and moves to the next row of the one-of grid. Enter is not
+# offered: it presses the dialog's OK button, closing it and dropping the value
+# being typed.
+$cmbAfter.Items.AddRange(@('{TAB}', '{DOWN}'))
+$cmbAfter.Text = '{TAB}'
 $cmbAfter.Location = New-Object System.Drawing.Point(240, 356)
 $cmbAfter.Size = New-Object System.Drawing.Size(212, 24)
 $form.Controls.Add($cmbAfter)
@@ -176,7 +186,11 @@ $btnStart.Add_Click({
     $stopReason = $null
     foreach ($value in $values) {
         if (Test-EscapePressed) { $stopReason = 'Esc was pressed'; break }
-        if ([SmartPasteWin32]::GetForegroundWindow() -ne $target) { $stopReason = 'the active window changed'; break }
+        $current = [SmartPasteWin32]::GetForegroundWindow()
+        if ($current -ne $target) {
+            $stopReason = "the active window changed from `"$([SmartPasteWin32]::GetWindowTitle($target))`" to `"$([SmartPasteWin32]::GetWindowTitle($current))`""
+            break
+        }
         [System.Windows.Forms.SendKeys]::SendWait((ConvertTo-SendKeysText $value) + $after)
         $typed++
         Start-Sleep -Milliseconds $delay
