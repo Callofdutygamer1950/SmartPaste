@@ -47,7 +47,10 @@ shortcut points to the new place.
    in the window. Check the count looks right.
 4. Click **Start typing** in SmartPaste, then click the first empty row in the
    Raiser's Edge one-of box before the countdown ends.
-5. SmartPaste types the values. Press **Esc** or switch to another window to stop.
+5. SmartPaste types the values. Press **Esc** at any time to stop it, including
+   during the countdown and while it opens a new box. While SmartPaste runs, Esc only
+   stops SmartPaste: it doesn't reach Raiser's Edge, so it won't cancel the one-of box
+   and the values already typed stay in it. Switching to another window also stops it.
    A message at the end says how many were typed.
 6. Check the list in the one-of box, then click **OK** yourself.
 
