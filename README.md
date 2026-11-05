@@ -39,7 +39,9 @@ shortcut points to the new place.
 ## How to use
 
 1. In Excel, select the column of values (constituent IDs, codes, ...) and copy it.
-2. In Raiser's Edge, add your criterion and choose **one of**.
+2. In Raiser's Edge, double-click the field in **Available Fields** and choose
+   **one of**. (Open it from the field list, not with **Change...** on an existing
+   filter: for lists over 500, SmartPaste reopens the field from that list.)
 3. Open SmartPaste: click the **SmartPaste** button on the box if the helper is
    running, or double-click `SmartPaste.bat`. The list from your clipboard appears
    in the window. Check the count looks right.
@@ -48,6 +50,15 @@ shortcut points to the new place.
 5. SmartPaste types the values. Press **Esc** or switch to another window to stop.
    A message at the end says how many were typed.
 6. Check the list in the one-of box, then click **OK** yourself.
+
+### Lists over 500 values
+
+A one-of box holds at most 500 values. When a box is full, SmartPaste clicks OK,
+opens the same field again from **Available Fields**, picks **one of**, and carries on
+in the new box. Raiser's Edge joins the boxes with **OR** by itself, so the query
+matches any value from any box. The last box is left open for you to check and
+click **OK**. If a box doesn't open or close as expected, SmartPaste stops and says
+why.
 
 ## Settings
 
@@ -60,6 +71,8 @@ shortcut points to the new place.
   after the first value and dropping the value that was being typed.
 - **Pause between values** - raise this if Raiser's Edge drops or mixes up values.
 - **Remove duplicate values** - on by default.
+- **Values per one-of box** - 500 by default, the most a box holds. When more values
+  remain, SmartPaste opens a new box (see above); this needs `{TAB}` as the key.
 
 If several columns were copied, only the first column is used. Blank lines are skipped.
 
@@ -69,6 +82,8 @@ If several columns were copied, only the first column is used. Blank lines are s
 - If it stops early, the message names the window that took over, which shows what
   Raiser's Edge did after the last value (for example, closed the box or opened a
   popup).
+- If the helper's SP icon doesn't appear, it shows a message saying why and saves it
+  to `%TEMP%\SmartPasteHelper.log`.
 - If the .bat file is blocked, right-click `SmartPaste.ps1` > **Properties** and tick
   **Unblock** if shown, or run it from PowerShell:
   `powershell -ExecutionPolicy Bypass -File .\SmartPaste.ps1`

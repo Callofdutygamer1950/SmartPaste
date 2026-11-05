@@ -48,11 +48,49 @@ function Test-EscapePressed {
     ([SmartPasteWin32]::GetAsyncKeyState($VK_ESCAPE) -band 0x8001) -ne 0
 }
 
+# Citrix shows the Raiser's Edge criteria box as its own window, titled like
+# "Edit Field Criteria - \\Remote".
+function Test-CriteriaBox([IntPtr]$hWnd) {
+    [SmartPasteWin32]::GetWindowTitle($hWnd) -like 'Edit Field Criteria*'
+}
+
+# Polls the active window until $condition (given its handle) is true. Returns the
+# handle, or IntPtr.Zero after $timeoutMs.
+function Wait-ForActiveWindow([scriptblock]$condition, [int]$timeoutMs) {
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($clock.ElapsedMilliseconds -lt $timeoutMs) {
+        $hWnd = [SmartPasteWin32]::GetForegroundWindow()
+        if (& $condition $hWnd) { return $hWnd }
+        Start-Sleep -Milliseconds 100
+    }
+    [IntPtr]::Zero
+}
+
+# Closes a full one-of box and opens a new one for the same field, ready to type
+# in its first row. Returns the new box's handle, or a string saying why it could
+# not. Raiser's Edge joins the new box to the old one with OR by itself.
+function Open-NextCriteriaBox([IntPtr]$box) {
+    # After Tab on the last row, focus is on OK, so Enter saves the box.
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    $query = Wait-ForActiveWindow { param($h) $h -ne $box -and -not (Test-CriteriaBox $h) } 5000
+    if ($query -eq [IntPtr]::Zero) { return 'the full one-of box did not close' }
+    # Focus is back on the field in the Available Fields list; Enter opens a new box.
+    Start-Sleep -Milliseconds 300
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    $newBox = Wait-ForActiveWindow { param($h) Test-CriteriaBox $h } 10000
+    if ($newBox -eq [IntPtr]::Zero) { return 'a new one-of box did not open' }
+    # Operator gets focus: "o" picks "one of", then Tab and Shift+Tab land in row 1.
+    Start-Sleep -Milliseconds 300
+    [System.Windows.Forms.SendKeys]::SendWait('o{TAB}+{TAB}')
+    Start-Sleep -Milliseconds 300
+    $newBox
+}
+
 # ---- Window ----------------------------------------------------------------
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'SmartPaste'
-$form.Size = New-Object System.Drawing.Size(480, 560)
+$form.Size = New-Object System.Drawing.Size(480, 592)
 $form.StartPosition = 'CenterScreen'
 $form.TopMost = $true
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
@@ -134,15 +172,30 @@ $numCountdown.Location = New-Object System.Drawing.Point(240, 420)
 $numCountdown.Size = New-Object System.Drawing.Size(80, 24)
 $form.Controls.Add($numCountdown)
 
+$lblPerBox = New-Object System.Windows.Forms.Label
+$lblPerBox.Text = 'Values per one-of box (then open a new box):'
+$lblPerBox.Location = New-Object System.Drawing.Point(12, 456)
+$lblPerBox.AutoSize = $true
+$form.Controls.Add($lblPerBox)
+
+# The one-of grid holds at most 500 rows.
+$numPerBox = New-Object System.Windows.Forms.NumericUpDown
+$numPerBox.Minimum = 1
+$numPerBox.Maximum = 500
+$numPerBox.Value = 500
+$numPerBox.Location = New-Object System.Drawing.Point(280, 452)
+$numPerBox.Size = New-Object System.Drawing.Size(80, 24)
+$form.Controls.Add($numPerBox)
+
 $btnStart = New-Object System.Windows.Forms.Button
 $btnStart.Text = 'Start typing'
-$btnStart.Location = New-Object System.Drawing.Point(12, 462)
+$btnStart.Location = New-Object System.Drawing.Point(12, 494)
 $btnStart.Size = New-Object System.Drawing.Size(440, 34)
 $form.Controls.Add($btnStart)
 
 $lblHint = New-Object System.Windows.Forms.Label
 $lblHint.Text = 'Press Esc or switch windows to stop.'
-$lblHint.Location = New-Object System.Drawing.Point(12, 500)
+$lblHint.Location = New-Object System.Drawing.Point(12, 532)
 $lblHint.AutoSize = $true
 $lblHint.ForeColor = [System.Drawing.Color]::DimGray
 $form.Controls.Add($lblHint)
@@ -169,6 +222,13 @@ $btnStart.Add_Click({
     }
     $after = $cmbAfter.Text
     $delay = [int]$numDelay.Value
+    $perBox = [int]$numPerBox.Value
+    if ($values.Count -gt $perBox -and $after -ne '{TAB}') {
+        [void][System.Windows.Forms.MessageBox]::Show(
+            "There are more than $perBox values, so SmartPaste will need to open new one-of boxes. That only works with {TAB} as the key after each value.",
+            'SmartPaste')
+        return
+    }
 
     $form.TopMost = $false
     $form.WindowState = 'Minimized'
@@ -183,9 +243,24 @@ $btnStart.Add_Click({
     $target = [SmartPasteWin32]::GetForegroundWindow()
     [void](Test-EscapePressed)  # clear any earlier Esc press
     $typed = 0
+    $inBox = 0
+    $boxes = 1
     $stopReason = $null
     foreach ($value in $values) {
         if (Test-EscapePressed) { $stopReason = 'Esc was pressed'; break }
+        if ($inBox -eq $perBox) {
+            if (-not (Test-CriteriaBox $target)) {
+                $stopReason = "$perBox values were typed and a new one-of box is needed, but the window typed into was not a Raiser's Edge criteria box"
+                break
+            }
+            $form.Text = 'SmartPaste - opening a new box...'
+            $next = Open-NextCriteriaBox $target
+            if ($next -is [string]) { $stopReason = $next; break }
+            $target = $next
+            $inBox = 0
+            $boxes++
+            $form.Text = 'SmartPaste - typing...'
+        }
         $current = [SmartPasteWin32]::GetForegroundWindow()
         if ($current -ne $target) {
             $stopReason = "the active window changed from `"$([SmartPasteWin32]::GetWindowTitle($target))`" to `"$([SmartPasteWin32]::GetWindowTitle($current))`""
@@ -193,6 +268,7 @@ $btnStart.Add_Click({
         }
         [System.Windows.Forms.SendKeys]::SendWait((ConvertTo-SendKeysText $value) + $after)
         $typed++
+        $inBox++
         Start-Sleep -Milliseconds $delay
     }
 
@@ -200,7 +276,8 @@ $btnStart.Add_Click({
     $form.WindowState = 'Normal'
     $form.TopMost = $true
     $form.Activate()
-    $message = "Typed $typed of $($values.Count) value(s)."
+    $message = "Typed $typed of $($values.Count) value(s)"
+    $message += if ($boxes -gt 1) { " across $boxes one-of boxes." } else { '.' }
     if ($stopReason) { $message += "`n`nStopped because $stopReason." }
     [void][System.Windows.Forms.MessageBox]::Show($message, 'SmartPaste')
 })

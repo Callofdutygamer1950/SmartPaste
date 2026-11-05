@@ -6,6 +6,16 @@
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+
+# The helper runs with no console, so a failure would otherwise vanish silently.
+# Show it and keep a copy in %TEMP%\SmartPasteHelper.log.
+trap {
+    $details = "$_`n`n$($_.InvocationInfo.PositionMessage)"
+    Set-Content -Path (Join-Path $env:TEMP 'SmartPasteHelper.log') -Value "$(Get-Date)`n$details"
+    [void][System.Windows.Forms.MessageBox]::Show("SmartPaste Helper could not start:`n`n$details", 'SmartPaste Helper')
+    exit 1
+}
+
 Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing @"
 using System;
 using System.Drawing;
@@ -18,6 +28,7 @@ public static class SmartPasteHelperWin32 {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -152,13 +163,17 @@ $overlay.ShowInTaskbar = $false
 $overlay.StartPosition = 'Manual'
 $overlay.TopMost = $true
 
-$scale = $overlay.DeviceDpi / 96
-$overlay.Size = New-Object System.Drawing.Size([int](92 * $scale), [int](26 * $scale))
-
 $btnOverlay = New-Object System.Windows.Forms.Button
 $btnOverlay.Text = 'SmartPaste'
 $btnOverlay.Dock = 'Fill'
 $btnOverlay.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+
+# Size the button from its text as drawn on this screen, so it fits at any display
+# scaling (fixed pixel sizes came out too small on scaled displays).
+$textSize = [System.Windows.Forms.TextRenderer]::MeasureText($btnOverlay.Text, $btnOverlay.Font)
+$pad = [int]($textSize.Height * 0.6)
+$overlay.Size = New-Object System.Drawing.Size(($textSize.Width + 2 * $pad), ($textSize.Height + $pad))
+$margin = $pad
 $btnOverlay.FlatStyle = 'Flat'
 $btnOverlay.BackColor = [System.Drawing.Color]::FromArgb(0, 103, 192)
 $btnOverlay.ForeColor = [System.Drawing.Color]::White
@@ -167,24 +182,27 @@ $overlay.Controls.Add($btnOverlay)
 $btnOverlay.Add_Click({ Open-SmartPaste })
 
 # Keeps the button on the box's bottom-right corner while the box is active,
-# and hidden the rest of the time.
+# and hidden the rest of the time. Visibility is read from Windows itself, not the
+# form's own record, because other programs (screen recorders, remote-control and
+# automation tools) can hide and re-show windows behind the form's back.
+$overlayHandle = $overlay.Handle
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 250
 $timer.Add_Tick({
     $hWnd = [SmartPasteHelperWin32]::GetForegroundWindow()
     $isCriteriaBox = ([SmartPasteHelperWin32]::GetWindowClass($hWnd) -eq $criteriaClass) -and
         ([SmartPasteHelperWin32]::GetWindowTitle($hWnd) -like $criteriaTitle)
+    $shown = [SmartPasteHelperWin32]::IsWindowVisible($overlayHandle)
     if (-not $isCriteriaBox) {
-        if ($overlay.Visible) { $overlay.Hide() }
+        if ($shown) { [void][SmartPasteHelperWin32]::ShowWindow($overlayHandle, 0) }  # SW_HIDE
         return
     }
     $rect = New-Object SmartPasteHelperWin32+RECT
     [void][SmartPasteHelperWin32]::GetWindowRect($hWnd, [ref]$rect)
-    $margin = [int](10 * $scale)
     $location = New-Object System.Drawing.Point(
         ($rect.Right - $overlay.Width - $margin), ($rect.Bottom - $overlay.Height - $margin))
     if ($overlay.Location -ne $location) { $overlay.Location = $location }
-    if (-not $overlay.Visible) { $overlay.Show() }
+    if (-not $shown) { [void][SmartPasteHelperWin32]::ShowWindow($overlayHandle, 4) }  # SW_SHOWNOACTIVATE
 })
 
 # ---- Run ---------------------------------------------------------------------
