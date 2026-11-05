@@ -6,6 +6,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 public static class SmartPasteWin32 {
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -16,6 +17,54 @@ public static class SmartPasteWin32 {
         var sb = new System.Text.StringBuilder(256);
         GetWindowText(hWnd, sb, sb.Capacity);
         return sb.ToString();
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public IntPtr extraInfo; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public IntPtr extraInfo; }
+    [StructLayout(LayoutKind.Explicit)]
+    struct INPUTUNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct INPUT { public uint type; public INPUTUNION u; }
+    [DllImport("user32.dll")] static extern uint SendInput(uint count, INPUT[] inputs, int size);
+    [DllImport("user32.dll")] static extern short VkKeyScan(char ch);
+    [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint mapType);
+
+    static INPUT Key(ushort vk, bool up, bool extended) {
+        var i = new INPUT();
+        i.type = 1;  // INPUT_KEYBOARD
+        i.u.ki.wVk = vk;
+        i.u.ki.wScan = (ushort)MapVirtualKey(vk, 0);
+        i.u.ki.dwFlags = (up ? 2u : 0u) | (extended ? 1u : 0u);  // KEYUP, EXTENDEDKEY
+        return i;
+    }
+
+    // Presses the keys for text, then trailingVk if it isn't 0, in one SendInput call.
+    // Returns the number of keys pressed, or -1 (sending nothing) if a character has
+    // no plain key on this keyboard layout, such as one needing AltGr.
+    public static int TypeText(string text, ushort trailingVk) {
+        var inputs = new List<INPUT>();
+        int keys = 0;
+        foreach (char ch in text) {
+            short scan = VkKeyScan(ch);
+            if (scan == -1 || (scan & 0x600) != 0) return -1;  // no key, or needs Ctrl/Alt
+            ushort vk = (ushort)(scan & 0xFF);
+            bool shift = (scan & 0x100) != 0;
+            if (shift) inputs.Add(Key(0x10, false, false));
+            inputs.Add(Key(vk, false, false));
+            inputs.Add(Key(vk, true, false));
+            if (shift) inputs.Add(Key(0x10, true, false));
+            keys++;
+        }
+        if (trailingVk != 0) {
+            bool extended = trailingVk >= 0x21 && trailingVk <= 0x28;  // navigation keys
+            inputs.Add(Key(trailingVk, false, extended));
+            inputs.Add(Key(trailingVk, true, extended));
+            keys++;
+        }
+        SendInput((uint)inputs.Count, inputs.ToArray(), Marshal.SizeOf(typeof(INPUT)));
+        return keys;
     }
 }
 "@
@@ -48,6 +97,26 @@ function Test-EscapePressed {
     ([SmartPasteWin32]::GetAsyncKeyState($VK_ESCAPE) -band 0x8001) -ne 0
 }
 
+# Keys from the "keys after each value" list that can go in the same batch as the
+# value itself.
+$trailingKeys = @{ '{TAB}' = 0x09; '{DOWN}' = 0x28 }
+
+# Types one value and the key after it. The keys go in a single batch, which is far
+# faster through Citrix than SendKeys (that waits after every key), then this waits
+# $keyPauseMs per key so Raiser's Edge keeps up and keys never pile up in a queue
+# (otherwise Esc and the window check would act too late). Values with characters
+# that have no plain key fall back to SendKeys.
+function Send-Value([string]$value, [string]$after, [int]$keyPauseMs) {
+    $vk = if ($trailingKeys.ContainsKey($after)) { $trailingKeys[$after] } else { 0 }
+    $keys = [SmartPasteWin32]::TypeText($value, $vk)
+    if ($keys -lt 0) {
+        [System.Windows.Forms.SendKeys]::SendWait((ConvertTo-SendKeysText $value) + $after)
+        return
+    }
+    if ($vk -eq 0) { [System.Windows.Forms.SendKeys]::SendWait($after) }
+    Start-Sleep -Milliseconds ($keys * $keyPauseMs)
+}
+
 # Citrix shows the Raiser's Edge criteria box as its own window, titled like
 # "Edit Field Criteria - \\Remote".
 function Test-CriteriaBox([IntPtr]$hWnd) {
@@ -70,6 +139,8 @@ function Wait-ForActiveWindow([scriptblock]$condition, [int]$timeoutMs) {
 # in its first row. Returns the new box's handle, or a string saying why it could
 # not. Raiser's Edge joins the new box to the old one with OR by itself.
 function Open-NextCriteriaBox([IntPtr]$box) {
+    # Let the last values finish arriving before closing the box.
+    Start-Sleep -Milliseconds 1000
     # After Tab on the last row, focus is on OK, so Enter saves the box.
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     $query = Wait-ForActiveWindow { param($h) $h -ne $box -and -not (Test-CriteriaBox $h) } 5000
@@ -144,16 +215,17 @@ $cmbAfter.Size = New-Object System.Drawing.Size(212, 24)
 $form.Controls.Add($cmbAfter)
 
 $lblDelay = New-Object System.Windows.Forms.Label
-$lblDelay.Text = 'Pause between values (milliseconds):'
+$lblDelay.Text = 'Pause per key typed (milliseconds):'
 $lblDelay.Location = New-Object System.Drawing.Point(12, 392)
 $lblDelay.AutoSize = $true
 $form.Controls.Add($lblDelay)
 
+# Raiser's Edge through Citrix took about 8 ms per key in testing; 12 leaves room.
 $numDelay = New-Object System.Windows.Forms.NumericUpDown
-$numDelay.Minimum = 0
-$numDelay.Maximum = 5000
-$numDelay.Increment = 50
-$numDelay.Value = 200
+$numDelay.Minimum = 1
+$numDelay.Maximum = 200
+$numDelay.Increment = 2
+$numDelay.Value = 12
 $numDelay.Location = New-Object System.Drawing.Point(240, 388)
 $numDelay.Size = New-Object System.Drawing.Size(80, 24)
 $form.Controls.Add($numDelay)
@@ -266,10 +338,9 @@ $btnStart.Add_Click({
             $stopReason = "the active window changed from `"$([SmartPasteWin32]::GetWindowTitle($target))`" to `"$([SmartPasteWin32]::GetWindowTitle($current))`""
             break
         }
-        [System.Windows.Forms.SendKeys]::SendWait((ConvertTo-SendKeysText $value) + $after)
+        Send-Value $value $after $delay
         $typed++
         $inBox++
-        Start-Sleep -Milliseconds $delay
     }
 
     $form.Text = 'SmartPaste'

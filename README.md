@@ -58,7 +58,8 @@ opens the same field again from **Available Fields**, picks **one of**, and carr
 in the new box. Raiser's Edge joins the boxes with **OR** by itself, so the query
 matches any value from any box. The last box is left open for you to check and
 click **OK**. If a box doesn't open or close as expected, SmartPaste stops and says
-why.
+why. Switching boxes takes a few seconds on purpose, so each step finishes before
+the next.
 
 ## Settings
 
@@ -69,7 +70,14 @@ why.
   [SendKeys](https://learn.microsoft.com/dotnet/api/system.windows.forms.sendkeys)
   notation). Don't use `{ENTER}` in the one-of box: it acts as OK, closing the box
   after the first value and dropping the value that was being typed.
-- **Pause between values** - raise this if Raiser's Edge drops or mixes up values.
+- **Pause per key typed** - sets the typing speed. Each value is sent in one quick
+  burst, then SmartPaste waits this long for every key in it (12 ms by default) so
+  Raiser's Edge keeps up and keys never pile up waiting, which keeps **Esc** and the
+  window check instant. Raise it if values come out wrong or the typing falls behind
+  (letters still appearing after a value should be done); lowering it below about
+  10 ms makes keys queue up. Values with characters that have no plain key on the
+  keyboard (such as accented letters typed with AltGr) are typed the older, slower
+  way.
 - **Remove duplicate values** - on by default.
 - **Values per one-of box** - 500 by default, the most a box holds. When more values
   remain, SmartPaste opens a new box (see above); this needs `{TAB}` as the key.
